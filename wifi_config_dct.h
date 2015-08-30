@@ -35,7 +35,7 @@ extern "C" {
 #define CONFIG_AP_VALID      WICED_FALSE
 
 /* This is the soft AP available for normal operation */
-#define SOFT_AP_SSID         "boom"
+#define SOFT_AP_SSID         "hermes"
 #define SOFT_AP_PASSPHRASE   "electrons"
 #define SOFT_AP_SECURITY     WICED_SECURITY_WPA2_AES_PSK
 #define SOFT_AP_CHANNEL      1

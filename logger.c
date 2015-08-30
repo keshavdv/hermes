@@ -4,10 +4,8 @@
  */
 
 #include "wiced.h"
-#include "http_server.h"
-#include "resources.h"
-#include "dns_redirect.h"
 #include <stdio.h>
+#include "pb_common.h"
 #include "pb_encode.h"
 #include "pb_decode.h"
 #include "messages.pb.h"
