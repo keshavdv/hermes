@@ -1,3 +1,7 @@
+### About
+
+This is a wireless DAQ application developed for the EMW3162 development board based on a custom network protocol.
+
 ### Dependencies
 
 Download the latest nanopb library and place it in `<WICED-SDK-PATH>/libraries/nanopb/`
