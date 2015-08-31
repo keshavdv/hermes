@@ -1,0 +1,70 @@
+message Payload {
+	enum MsgType {
+		DeviceInfo = 0;
+		DeviceControlRequest = 1;
+		DeviceControlResponse = 2;
+		SensorState = 3;
+	}
+	required MsgType type = 1;
+}
+
+message Sensor {
+	required int32 id = 1;
+	enum SensorType {
+	    ANALOG = 0;
+	    DIGITAL = 1;
+	    DIFFERENTIAL = 2;
+	    STRAIN = 3;
+	    TEMPERATURE = 4;
+	}
+	required SensorType type = 2;
+	required string name = 3;
+}
+
+message DeviceInfo {
+	required string model = 1;
+	repeated Sensor sensors = 2;
+}
+
+message SensorConfiguration {
+	required int32 id = 1;
+	required bool enabled = 2;
+	required int32 frequency = 3;
+}
+
+message DeviceConfiguration {
+	repeated SensorConfiguration configuration = 1;
+}
+
+message DeviceControlRequest {
+	enum Action {
+	    START = 0;
+	    STOP = 1;
+	    RESET = 2;
+	    SET_CONFIG = 3;
+	    GET_CONFIG = 4;
+	}
+	required int32 id = 1;
+	required Action action = 2;
+	optional DeviceConfiguration config = 3;
+}
+
+message DeviceControlResponse {
+	enum Status {
+		OK = 0;
+		ERROR = 1;
+	}
+	required int32 requestId = 1; 
+	required Status status = 2;
+	optional DeviceConfiguration config = 3;
+}
+
+message SensorValue {
+  required uint32 id = 1;
+  required uint32 value = 2;
+}
+
+message SensorUpdate {
+  	required uint32 timestamp = 1;
+	repeated SensorValue messages = 2;
+}
