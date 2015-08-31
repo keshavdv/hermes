@@ -38,6 +38,7 @@
  *                    Constants
  ******************************************************/
 
+static int POLL_DELAY = 100;
 /******************************************************
  *                   Enumerations
  ******************************************************/
@@ -114,12 +115,14 @@ void application_start(void)
     while(WICED_TRUE) {
         wiced_gpio_output_high(WICED_LED1);
 
-        WPRINT_APP_INFO(("Sampling: #%d\n", sample));
+        // wiced_get_nanosecond_clock_value
+        // WPRINT_APP_INFO(("Sampling: #%d\n", sample));
         wiced_time_get_time(&sys_time);
-        WPRINT_APP_INFO(("Time is: %d\n", sys_time));
-        sample++;
+        // WPRINT_APP_INFO(("Time is: %d\n", sys_time));
+        // sample++;
+        wiced_rtos_delay_milliseconds(POLL_DELAY);
         wiced_gpio_output_low(WICED_LED1);
-        wiced_rtos_delay_milliseconds(1000);
+        wiced_rtos_delay_milliseconds(POLL_DELAY);
     }
 }
 
@@ -181,21 +184,6 @@ static void tcp_server_thread_main(uint32_t arg)
         /* Wait for a connection */
         wiced_result_t result = wiced_tcp_accept(&server->socket);
         if (result == WICED_SUCCESS) {
-
-            /* Send device information back */
-            {
-                DeviceConfiguration dev_conf;
-                pb_ostream_t stream = pb_ostream_from_buffer(buffer, sizeof(buffer));
-
-                // dev_conf.sensors = NULL;
-
-                status = pb_encode(&stream, DeviceConfiguration_fields, &dev_conf);
-                message_length = stream.bytes_written;
-                if (!status)
-                {
-                    WPRINT_APP_INFO(("Encoding failed: %s\n", PB_GET_ERROR(&stream)));
-                }
-            }
 
             /* Wait for start message. Receive the query from the TCP client */
             if (wiced_tcp_receive(&server->socket, &temp_packet, WICED_WAIT_FOREVER) == WICED_SUCCESS) {
