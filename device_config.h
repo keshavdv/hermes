@@ -2,7 +2,7 @@
  * Copyright 2015, Keshav Varma
  * All Rights Reserved.
  */
-
+h
 #ifndef DEVICE_CONFIG
 #define DEVICE_CONFIG
 
@@ -10,10 +10,15 @@
 extern "C" {
 #endif
 
-/* Input configuration */
-const int INPUT_IDS[];
-const char* INPUT_NAMES[]; 
+#include "messages.pb.h"
 
+/* Setup device configuration */
+extern const DeviceInfo DEVICE_INFO = {
+	{
+	{Sensor_init_zero}
+	{SensorConfiguration_init_zero}
+	}
+};
 
 #ifdef __cplusplus
 } /* extern "C" */
