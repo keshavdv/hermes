@@ -1,2 +1,2 @@
 all:
-	python ../../libraries/nanopb/generator/nanopb_generator.py messages.desc
+	python ../../libraries/nanopb/generator/nanopb_generator.py protocol/messages.desc

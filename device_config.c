@@ -8,5 +8,5 @@ extern DEVICE_INFO = DeviceInfo_init_zero;
 
 int init_device_info(){
 	DEVICE_INFO.model = "Hermes v1.0";
-	DEVICE_INFO.sensors = 
+	// DEVICE_INFO.sensors = ;
 }

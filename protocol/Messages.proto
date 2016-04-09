@@ -6,6 +6,10 @@ message Payload {
 		SensorState = 3;
 	}
 	required MsgType type = 1;
+	optional DeviceProfile profile = 2;
+	optional DeviceControlRequest request = 3;
+    optional DeviceControlResponse response = 4;
+    optional SensorState state = 5;
 }
 
 message Sensor {
@@ -21,7 +25,7 @@ message Sensor {
 	required string name = 3;
 }
 
-message DeviceInfo {
+message DeviceProfile {
 	required string model = 1;
 	repeated Sensor sensors = 2;
 }
@@ -64,7 +68,7 @@ message SensorValue {
   required uint32 value = 2;
 }
 
-message SensorUpdate {
+message SensorState {
   	required uint32 timestamp = 1;
 	repeated SensorValue messages = 2;
 }
