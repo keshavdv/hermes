@@ -124,7 +124,7 @@ void InitializeTimer()
     TIM_TimeBaseInitTypeDef timerInitStructure;
     timerInitStructure.TIM_Prescaler = 120000-1;
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
-    timerInitStructure.TIM_Period = 1000-1;
+    timerInitStructure.TIM_Period = 100-1;
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
@@ -150,6 +150,49 @@ void DisableTimerInterrupt()
     nvicStructure.NVIC_IRQChannel = TIM2_IRQn;
     nvicStructure.NVIC_IRQChannelCmd = DISABLE;
     NVIC_Init(&nvicStructure);
+}
+
+bool encode_state(pb_ostream_t *stream, const pb_field_t *field, void * const *arg)
+{
+    SensorValue sv = SensorValue_init_zero;
+    datum *data = (datum*) *arg;
+
+    sv.id = 1;
+    sv.value = data->d0;
+    if (!pb_encode_tag_for_field(stream, field))
+        return false;
+
+    if (!pb_encode_submessage(stream, SensorValue_fields, &sv))
+        return false;
+
+    sv.id = 2;
+    sv.value = data->a0;
+    if (!pb_encode_tag_for_field(stream, field))
+        return false;
+
+    if (!pb_encode_submessage(stream, SensorValue_fields, &sv))
+        return false;
+
+    return true;
+}
+
+bool encode_payload(pb_ostream_t *stream, const pb_field_t messagetype[], const void *message)
+{
+    const pb_field_t *field;
+    for (field = Payload_fields; field->tag != 0; field++)
+    {
+        if (field->ptr == messagetype)
+        {
+            /* This is our field, encode the message using it. */
+            if (!pb_encode_tag_for_field(stream, field))
+                return false;
+
+            return pb_encode_submessage(stream, messagetype, message);
+        }
+    }
+
+    /* Didn't find the field for messagetype */
+    return false;
 }
 
 void application_start(void)
@@ -209,31 +252,39 @@ void application_start(void)
                 continue;
             }
 
-            // Payload message = Payload_init_zero;
-            // pb_ostream_t stream = pb_ostream_from_buffer(tx_data, available_data_length);
+            Payload message = Payload_init_zero;
+            pb_ostream_t stream = pb_ostream_from_buffer(tx_data + 4, available_data_length);
 
-            // message.type = Payload_MsgType_SensorState;
-            // message.state =
+            message.type = Payload_MsgType_SensorState;
+            SensorState ss = SensorState_init_zero;
+            ss.timestamp = pending->ts;
 
-            // status = pb_encode(&stream, Payload_fields, &message);
-            // int message_length = stream.bytes_written;
+            ss.messages.funcs.encode = &encode_state;
+            ss.messages.arg = pending;
+            encode_payload(&stream, SensorState_fields, &ss);
 
-            // if (!status)
-            // {
-            //     printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
-            //     continue;
-            // }
-            char* msg = "this is atest";
-            // int message_length = sizeof(msg);
-            // memcpy(tx_data, "test", strlen("test"));
-            uint32_t message_length = strlen(msg) + sizeof(uint32_t);
+            if (!status)
+            {
+                printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
+                continue;
+            }
+
+            status = pb_encode(&stream, Payload_fields, &message);
+            int pkt_len = stream.bytes_written;
+
+            if (!status)
+            {
+                printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
+                continue;
+            }
+
+            /* Add length prefix */
+            uint32_t message_length = pkt_len + sizeof(uint32_t);
             WPRINT_APP_INFO(("length %d\n", message_length));
-            // memcpy(tx_data, message_length, sizeof(message_length));
             tx_data[0] = (message_length >> 24) & 0xFF;
             tx_data[1] = (message_length >> 16) & 0xFF;
             tx_data[2] = (message_length >> 8) & 0xFF;
             tx_data[3] = (message_length) & 0xFF;
-            memcpy(tx_data + 4, msg, message_length);
 
             /* Set the end of the data portion */
             wiced_packet_set_data_end(tx_packet, (uint8_t*)tx_data + message_length);
