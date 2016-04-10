@@ -35,6 +35,13 @@ Queue*  queue_initialize(unsigned int element_size, unsigned int capacity) {
     return queue;
 }
 
+
+int queue_reset(Queue *queue) {
+    queue->head = 0;
+    queue->tail = 0;
+    return 0;
+}
+
 int queue_destroy(Queue *queue) {
     free(queue->buffer);
     free(queue);

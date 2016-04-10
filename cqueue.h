@@ -8,5 +8,6 @@ int queue_destroy(Queue* queue);
 void* queue_enqueue(Queue* queue);
 int queue_dequeue(Queue* queue, void **out_element);
 int queue_size(Queue* queue);
+int queue_reset(Queue* queue);
 
 #endif

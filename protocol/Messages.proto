@@ -1,6 +1,6 @@
 message Payload {
 	enum MsgType {
-		DeviceInfo = 0;
+		DeviceProfile = 0;
 		DeviceControlRequest = 1;
 		DeviceControlResponse = 2;
 		SensorState = 3;

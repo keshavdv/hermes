@@ -10,7 +10,7 @@
 
 NAME := App_Logger
 
-$(NAME)_SOURCES := cqueue.c logger.c protocol/messages.pb.c
+$(NAME)_SOURCES := device_config.c cqueue.c logger.c protocol/messages.pb.c
 
 $(NAME)_COMPONENTS := libraries/nanopb
 

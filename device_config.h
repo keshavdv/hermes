@@ -20,6 +20,9 @@ extern "C" {
 // 	}
 // };
 
+bool _encode_sensors(pb_ostream_t *stream, const pb_field_t *field, void * const *arg);
+DeviceProfile* encode_deviceprofile();
+
 typedef enum {IDLE, POLL} device_state;
 
 typedef struct {

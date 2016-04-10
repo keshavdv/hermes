@@ -62,7 +62,6 @@ typedef struct
  *               Static Function Declarations
  ******************************************************/
 static void tcp_server_thread_main(uint32_t arg);
-static void poll_thread_main(uint32_t arg);
 static wiced_result_t tcp_server_process(  tcp_server_handle_t* server, wiced_packet_t* rx_packet );
 
 /******************************************************
@@ -71,19 +70,16 @@ static wiced_result_t tcp_server_process(  tcp_server_handle_t* server, wiced_pa
 
 volatile uint32_t sample = 0;
 static device_state state = IDLE;
-static wiced_thread_t      tcp_thread, poll_thread;
+static wiced_thread_t      tcp_thread;
 static wiced_bool_t        quit = WICED_FALSE;
-static wiced_queue_t    sample_queue;
-static wiced_time_t     sys_time;
 static volatile tcp_server_handle_t tcp_server_handle;
-static uint64_t nt_time;
 static const wiced_ip_setting_t ap_ip_settings =
 {
     INITIALISER_IPV4_ADDRESS( .ip_address, MAKE_IPV4_ADDRESS( 192,168,  0,  1 ) ),
     INITIALISER_IPV4_ADDRESS( .netmask,    MAKE_IPV4_ADDRESS( 255,255,255,  0 ) ),
     INITIALISER_IPV4_ADDRESS( .gateway,    MAKE_IPV4_ADDRESS( 192,168,  0,  1 ) ),
 };
-static Queue* dataBuffer;
+static Queue* sample_queue;
 
 /******************************************************
  *               Function Definitions
@@ -105,7 +101,7 @@ void TIM2_irq()
             led_on = !led_on;
         }
 
-        tmpDatum = (datum*) queue_enqueue(dataBuffer);
+        // tmpDatum = (datum*) queue_enqueue(sample_queue);
         if (tmpDatum != NULL) {
             tmpDatum->ts = sample;
             tmpDatum->d0 = wiced_gpio_input_get(WICED_GPIO_14);
@@ -227,7 +223,7 @@ void application_start(void)
 
     wiced_init_nanosecond_clock();
     wiced_reset_nanosecond_clock();
-    dataBuffer = queue_initialize(sizeof(datum), 2000);
+    sample_queue = queue_initialize(sizeof(datum), 2000);
 
     /* Configure sample timer */
     WPRINT_APP_INFO(("Initializing sample timer...\n"));
@@ -240,7 +236,7 @@ void application_start(void)
     uint16_t        available_data_length;
 
     while(WICED_TRUE) {
-        int err = queue_dequeue(dataBuffer, (void**)&pending);
+        int err = queue_dequeue(sample_queue, (void**)&pending);
         if(err == 0) {
             WPRINT_APP_INFO(("Sending... (%d->%d->%d)\n", pending->ts, pending->d0, pending->a0));
             bool status;
@@ -336,6 +332,7 @@ static wiced_result_t tcp_server_process(  tcp_server_handle_t* server, wiced_pa
                 switch(message.request.action) {
                     case DeviceControlRequest_Action_START:
                         sample = 0;
+                        queue_reset(sample);
                         EnableTimerInterrupt();
                         break;
                     case DeviceControlRequest_Action_STOP:
@@ -371,6 +368,10 @@ static void tcp_server_thread_main(uint32_t arg)
     uint8_t buffer[1024];
     size_t message_length;
     bool status;
+    wiced_packet_t* tx_packet;
+    char*           tx_data;
+    uint16_t        available_data_length;
+
 
     tcp_server_handle_t* server = (tcp_server_handle_t*) arg;
     WPRINT_APP_INFO(("Waiting for connection...\n"));
@@ -386,7 +387,61 @@ static void tcp_server_thread_main(uint32_t arg)
         }
 
         if (result == WICED_SUCCESS) {
-            /* Wait for start message. Receive the query from the TCP client */
+
+            /* Send Device Profile */
+            if (wiced_packet_create_tcp(&tcp_server_handle.socket, TCP_PACKET_MAX_DATA_LENGTH, &tx_packet, (uint8_t**)&tx_data, &available_data_length) != WICED_SUCCESS)
+            {
+                WPRINT_APP_INFO(("TCP packet creation failed\n"));
+                continue;
+            }
+            WPRINT_APP_INFO(("STREAM!\n"));
+            Payload message = Payload_init_zero;
+            pb_ostream_t stream = pb_ostream_from_buffer(tx_data + 4, available_data_length);
+
+            message.type = Payload_MsgType_DeviceProfile;
+            DeviceProfile device_info = DeviceProfile_init_zero;
+            strcpy(device_info.model, "Hermes v1.0");
+            device_info.sensors.funcs.encode = &_encode_sensors;
+            device_info.sensors.arg = NULL;
+            WPRINT_APP_INFO(("PALOAD %p!\n", &device_info));
+            bool status = encode_payload(&stream, DeviceProfile_fields, &device_info);
+
+            if (!status)
+            {
+                printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
+                continue;
+            }
+
+            status = pb_encode(&stream, Payload_fields, &message);
+            int pkt_len = stream.bytes_written;
+
+            if (!status)
+            {
+                printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
+                continue;
+            }
+            WPRINT_APP_INFO(("ENCODED!\n"));
+            /* Add length prefix */
+            uint32_t message_length = pkt_len + sizeof(uint32_t);
+            WPRINT_APP_INFO(("length %d\n", message_length));
+            tx_data[0] = (message_length >> 24) & 0xFF;
+            tx_data[1] = (message_length >> 16) & 0xFF;
+            tx_data[2] = (message_length >> 8) & 0xFF;
+            tx_data[3] = (message_length) & 0xFF;
+
+            /* Set the end of the data portion */
+            wiced_packet_set_data_end(tx_packet, (uint8_t*)tx_data + message_length);
+
+            /* Send the TCP packet */
+            if (wiced_tcp_send_packet(&server->socket, tx_packet) != WICED_SUCCESS)
+            {
+                WPRINT_APP_INFO(("TCP packet send failed\n"));
+
+                /* Delete packet, since the send failed */
+                wiced_packet_delete(tx_packet);
+            }
+
+            /* Wait for control messages. Receive the query from the TCP client */
             while (wiced_tcp_receive(&server->socket, &temp_packet, WICED_WAIT_FOREVER) == WICED_SUCCESS) {
 
                 /* Process the client request */
