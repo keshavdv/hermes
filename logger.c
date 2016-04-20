@@ -12,18 +12,18 @@
 #include <inttypes.h>
 #include "cqueue.h"
 #include "device_config.h"
+#include "encode.h"
 
 /******************************************************
  *                      Macros
  ******************************************************/
 
-#define TCP_PACKET_MAX_DATA_LENGTH          (30)
+#define TCP_PACKET_MAX_DATA_LENGTH          (60)
 #define TCP_SERVER_LISTEN_PORT              (5000)
 #define TCP_SERVER_THREAD_PRIORITY          (WICED_DEFAULT_LIBRARY_PRIORITY)
 /* Stack size should cater for printf calls */
-#define TCP_SERVER_STACK_SIZE               (6200)
+#define TCP_SERVER_STACK_SIZE               (10000)
 #define TCP_SERVER_COMMAND_MAX_SIZE         (10)
-#define TCP_PACKET_MAX_DATA_LENGTH          (30)
 
 /* Enable this define to demonstrate tcp keep alive procedure */
 /* #define TCP_KEEPALIVE_ENABLED */
@@ -84,32 +84,38 @@ static Queue* sample_queue;
 /******************************************************
  *               Function Definitions
  ******************************************************/
-volatile int led_on = 0;
+volatile int led_on = 0, led2_on = 0;
 volatile datum* tmpDatum;
 
 void TIM2_irq()
 {
     if (TIM_GetITStatus(TIM2, TIM_IT_Update) != RESET)
     {
-        TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
-        /* Blink led */
-        if(led_on) {
-            wiced_gpio_output_high(WICED_LED1);
-            led_on = !led_on;
-        } else {
-            wiced_gpio_output_low(WICED_LED1);
-            led_on = !led_on;
-        }
 
-        // tmpDatum = (datum*) queue_enqueue(sample_queue);
+
+        tmpDatum = (datum*) queue_enqueue(sample_queue);
         if (tmpDatum != NULL) {
+            if(led_on) {
+                wiced_gpio_output_high(WICED_LED1);
+                led_on = !led_on;
+            } else {
+                wiced_gpio_output_low(WICED_LED1);
+                led_on = !led_on;
+            }
             tmpDatum->ts = sample;
             tmpDatum->d0 = wiced_gpio_input_get(WICED_GPIO_14);
             wiced_adc_take_sample(WICED_ADC_4, &tmpDatum->a0);
         } else {
-            // wiced_gpio_output_high(WICED_LED1);
+            if(led2_on) {
+                wiced_gpio_output_high(WICED_LED2);
+                led2_on = !led2_on;
+            } else {
+                wiced_gpio_output_low(WICED_LED2);
+                led2_on = !led2_on;
+            }
         }
         sample++;
+        TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
     }
 }
 
@@ -120,7 +126,7 @@ void InitializeTimer()
     TIM_TimeBaseInitTypeDef timerInitStructure;
     timerInitStructure.TIM_Prescaler = 120000-1;
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
-    timerInitStructure.TIM_Period = 100-1;
+    timerInitStructure.TIM_Period = 50-1;
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
@@ -146,49 +152,6 @@ void DisableTimerInterrupt()
     nvicStructure.NVIC_IRQChannel = TIM2_IRQn;
     nvicStructure.NVIC_IRQChannelCmd = DISABLE;
     NVIC_Init(&nvicStructure);
-}
-
-bool encode_state(pb_ostream_t *stream, const pb_field_t *field, void * const *arg)
-{
-    SensorValue sv = SensorValue_init_zero;
-    datum *data = (datum*) *arg;
-
-    sv.id = 1;
-    sv.value = data->d0;
-    if (!pb_encode_tag_for_field(stream, field))
-        return false;
-
-    if (!pb_encode_submessage(stream, SensorValue_fields, &sv))
-        return false;
-
-    sv.id = 2;
-    sv.value = data->a0;
-    if (!pb_encode_tag_for_field(stream, field))
-        return false;
-
-    if (!pb_encode_submessage(stream, SensorValue_fields, &sv))
-        return false;
-
-    return true;
-}
-
-bool encode_payload(pb_ostream_t *stream, const pb_field_t messagetype[], const void *message)
-{
-    const pb_field_t *field;
-    for (field = Payload_fields; field->tag != 0; field++)
-    {
-        if (field->ptr == messagetype)
-        {
-            /* This is our field, encode the message using it. */
-            if (!pb_encode_tag_for_field(stream, field))
-                return false;
-
-            return pb_encode_submessage(stream, messagetype, message);
-        }
-    }
-
-    /* Didn't find the field for messagetype */
-    return false;
 }
 
 void application_start(void)
@@ -223,7 +186,7 @@ void application_start(void)
 
     wiced_init_nanosecond_clock();
     wiced_reset_nanosecond_clock();
-    sample_queue = queue_initialize(sizeof(datum), 2000);
+    sample_queue = queue_initialize(sizeof(datum), 1000);
 
     /* Configure sample timer */
     WPRINT_APP_INFO(("Initializing sample timer...\n"));
@@ -236,7 +199,12 @@ void application_start(void)
     uint16_t        available_data_length;
 
     while(WICED_TRUE) {
+        // wiced_rtos_delay_milliseconds(2000);
+
+        // int err = 2;
+        // DisableTimerInterrupt();
         int err = queue_dequeue(sample_queue, (void**)&pending);
+        // EnableTimerInterrupt();
         if(err == 0) {
             WPRINT_APP_INFO(("Sending... (%d->%d->%d)\n", pending->ts, pending->d0, pending->a0));
             bool status;
@@ -257,11 +225,12 @@ void application_start(void)
 
             ss.messages.funcs.encode = &encode_state;
             ss.messages.arg = pending;
-            encode_payload(&stream, SensorState_fields, &ss);
+            status = encode_payload(&stream, SensorState_fields, &ss);
 
             if (!status)
             {
                 printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
+                wiced_packet_delete(tx_packet);
                 continue;
             }
 
@@ -271,6 +240,7 @@ void application_start(void)
             if (!status)
             {
                 printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
+                wiced_packet_delete(tx_packet);
                 continue;
             }
 
@@ -284,6 +254,7 @@ void application_start(void)
 
             /* Set the end of the data portion */
             wiced_packet_set_data_end(tx_packet, (uint8_t*)tx_data + message_length);
+            WPRINT_APP_INFO(("end %p, %p\n", &tcp_server_handle.socket, tx_packet));
 
             /* Send the TCP packet */
             if (wiced_tcp_send_packet(&tcp_server_handle.socket, tx_packet) != WICED_SUCCESS)
@@ -295,6 +266,8 @@ void application_start(void)
                 tcp_server_handle.quit=WICED_TRUE;
                 continue;
             }
+                // wiced_packet_delete(tx_packet);
+
             WPRINT_APP_INFO(("Sent data.\n"));
         } else {
             wiced_rtos_delay_milliseconds(2);
@@ -380,11 +353,11 @@ static void tcp_server_thread_main(uint32_t arg)
 
         /* Wait for a connection */
         wiced_result_t result = wiced_tcp_accept(&server->socket);
-        result = wiced_tcp_enable_keepalive(&server->socket, TCP_SERVER_KEEP_ALIVE_INTERVAL, TCP_SERVER_KEEP_ALIVE_PROBES, TCP_SERVER_KEEP_ALIVE_TIME );
-        if( result != WICED_SUCCESS )
-        {
-            WPRINT_APP_INFO(("Keep alive initialization failed \n"));
-        }
+        // result = wiced_tcp_enable_keepalive(&server->socket, TCP_SERVER_KEEP_ALIVE_INTERVAL, TCP_SERVER_KEEP_ALIVE_PROBES, TCP_SERVER_KEEP_ALIVE_TIME );
+        // if( result != WICED_SUCCESS )
+        // {
+        //     WPRINT_APP_INFO(("Keep alive initialization failed \n"));
+        // }
 
         if (result == WICED_SUCCESS) {
 
