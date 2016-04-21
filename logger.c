@@ -17,7 +17,10 @@
 /******************************************************
  *                      Macros
  ******************************************************/
-
+#define SAMPLE_RATE_HZ                      (50)
+#define SIZE_PER_SAMPLE                     (35)
+#define SENT_SAMPLES_PER_SECOND             (10)
+#define NUM_SAMPLES_PER_PACKET              (SAMPLE_RATE_HZ/SENT_SAMPLES_PER_SECOND)
 #define TCP_PACKET_MAX_DATA_LENGTH          (60)
 #define TCP_SERVER_LISTEN_PORT              (5000)
 #define TCP_SERVER_THREAD_PRIORITY          (WICED_DEFAULT_LIBRARY_PRIORITY)
@@ -106,13 +109,13 @@ void TIM2_irq()
             tmpDatum->d0 = wiced_gpio_input_get(WICED_GPIO_14);
             wiced_adc_take_sample(WICED_ADC_4, &tmpDatum->a0);
         } else {
-            if(led2_on) {
-                wiced_gpio_output_high(WICED_LED2);
-                led2_on = !led2_on;
-            } else {
+            // if(led2_on) {
+                // wiced_gpio_output_high(WICED_LED2);
+                // led2_on = !led2_on;
+            // } else {
                 wiced_gpio_output_low(WICED_LED2);
-                led2_on = !led2_on;
-            }
+                // led2_on = !led2_on;
+            // }
         }
         sample++;
         TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
@@ -126,7 +129,7 @@ void InitializeTimer()
     TIM_TimeBaseInitTypeDef timerInitStructure;
     timerInitStructure.TIM_Prescaler = 120000-1;
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
-    timerInitStructure.TIM_Period = 50-1;
+    timerInitStructure.TIM_Period = (1000/SAMPLE_RATE_HZ)-1;
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
@@ -192,32 +195,41 @@ void application_start(void)
     WPRINT_APP_INFO(("Initializing sample timer...\n"));
     InitializeTimer();
 
+    /* Reset overflow LED */
+    wiced_gpio_output_high(WICED_LED2);
+
     /* Continuously send buffered data */
     datum *pending;
     wiced_packet_t* tx_packet;
     char*           tx_data;
     uint16_t        available_data_length;
 
+    // Preallocate space for 100 encoded samples to be sent via TCP
+    char* packet_buffer = malloc(SIZE_PER_SAMPLE * NUM_SAMPLES_PER_PACKET);
+    int count = 0;
+
+    WPRINT_APP_INFO(("Sending %d samples in each packet.\n", NUM_SAMPLES_PER_PACKET));
     while(WICED_TRUE) {
-        // wiced_rtos_delay_milliseconds(2000);
 
-        // int err = 2;
-        // DisableTimerInterrupt();
-        int err = queue_dequeue(sample_queue, (void**)&pending);
-        // EnableTimerInterrupt();
-        if(err == 0) {
-            WPRINT_APP_INFO(("Sending... (%d->%d->%d)\n", pending->ts, pending->d0, pending->a0));
-            bool status;
+        WPRINT_APP_INFO(("Sending...%d\n", count++));
 
-            /* Send echo back */
-            if (wiced_packet_create_tcp(&tcp_server_handle.socket, TCP_PACKET_MAX_DATA_LENGTH, &tx_packet, (uint8_t**)&tx_data, &available_data_length) != WICED_SUCCESS)
-            {
-                WPRINT_APP_INFO(("TCP packet creation failed\n"));
+        // Encode NUM_SAMPLES_PER_PACKET samples per packet
+        int i = 0;
+        int pkt_len = 0;
+        bool status;
+
+        char* tx_data = packet_buffer;
+
+        while(i < NUM_SAMPLES_PER_PACKET) {
+
+            int err = queue_dequeue(sample_queue, (void**)&pending);
+            if(err != 0) {
+                wiced_rtos_delay_milliseconds(2);
                 continue;
             }
 
             Payload message = Payload_init_zero;
-            pb_ostream_t stream = pb_ostream_from_buffer(tx_data + 4, available_data_length);
+            pb_ostream_t stream = pb_ostream_from_buffer(tx_data + 4, SIZE_PER_SAMPLE);
 
             message.type = Payload_MsgType_SensorState;
             SensorState ss = SensorState_init_zero;
@@ -229,49 +241,42 @@ void application_start(void)
 
             if (!status)
             {
-                printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
-                wiced_packet_delete(tx_packet);
+                printf("Encoding submessage failed: %s\n", PB_GET_ERROR(&stream));
                 continue;
             }
 
             status = pb_encode(&stream, Payload_fields, &message);
-            int pkt_len = stream.bytes_written;
+            uint32_t message_length = stream.bytes_written + sizeof(uint32_t);
+
+            pkt_len += message_length;
 
             if (!status)
             {
                 printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
-                wiced_packet_delete(tx_packet);
                 continue;
             }
 
             /* Add length prefix */
-            uint32_t message_length = pkt_len + sizeof(uint32_t);
-            WPRINT_APP_INFO(("length %d\n", message_length));
+            // WPRINT_APP_INFO(("length %d\n", message_length));
             tx_data[0] = (message_length >> 24) & 0xFF;
             tx_data[1] = (message_length >> 16) & 0xFF;
             tx_data[2] = (message_length >> 8) & 0xFF;
             tx_data[3] = (message_length) & 0xFF;
 
-            /* Set the end of the data portion */
-            wiced_packet_set_data_end(tx_packet, (uint8_t*)tx_data + message_length);
-            WPRINT_APP_INFO(("end %p, %p\n", &tcp_server_handle.socket, tx_packet));
+            tx_data = tx_data + message_length;
 
-            /* Send the TCP packet */
-            if (wiced_tcp_send_packet(&tcp_server_handle.socket, tx_packet) != WICED_SUCCESS)
-            {
-                WPRINT_APP_INFO(("TCP packet send failed\n"));
-
-                /* Delete packet, since the send failed */
-                wiced_packet_delete(tx_packet);
-                tcp_server_handle.quit=WICED_TRUE;
-                continue;
-            }
-                // wiced_packet_delete(tx_packet);
-
-            WPRINT_APP_INFO(("Sent data.\n"));
-        } else {
-            wiced_rtos_delay_milliseconds(2);
+            i++;
         }
+
+        /* Send the TCP packet */
+        if (wiced_tcp_send_buffer(&tcp_server_handle.socket, packet_buffer, pkt_len) != WICED_SUCCESS)
+        {
+            WPRINT_APP_INFO(("TCP packet send failed\n"));
+            tcp_server_handle.quit=WICED_TRUE;
+            continue;
+        }
+
+        WPRINT_APP_INFO(("Sent data.\n"));
     }
 }
 
@@ -359,6 +364,9 @@ static void tcp_server_thread_main(uint32_t arg)
         //     WPRINT_APP_INFO(("Keep alive initialization failed \n"));
         // }
 
+        WPRINT_APP_INFO(("Client connected!\n"));
+
+
         if (result == WICED_SUCCESS) {
 
             /* Send Device Profile */
@@ -367,7 +375,7 @@ static void tcp_server_thread_main(uint32_t arg)
                 WPRINT_APP_INFO(("TCP packet creation failed\n"));
                 continue;
             }
-            WPRINT_APP_INFO(("STREAM!\n"));
+
             Payload message = Payload_init_zero;
             pb_ostream_t stream = pb_ostream_from_buffer(tx_data + 4, available_data_length);
 
@@ -376,7 +384,7 @@ static void tcp_server_thread_main(uint32_t arg)
             strcpy(device_info.model, "Hermes v1.0");
             device_info.sensors.funcs.encode = &_encode_sensors;
             device_info.sensors.arg = NULL;
-            WPRINT_APP_INFO(("PALOAD %p!\n", &device_info));
+
             bool status = encode_payload(&stream, DeviceProfile_fields, &device_info);
 
             if (!status)
@@ -393,10 +401,8 @@ static void tcp_server_thread_main(uint32_t arg)
                 printf("Encoding failed: %s\n", PB_GET_ERROR(&stream));
                 continue;
             }
-            WPRINT_APP_INFO(("ENCODED!\n"));
             /* Add length prefix */
             uint32_t message_length = pkt_len + sizeof(uint32_t);
-            WPRINT_APP_INFO(("length %d\n", message_length));
             tx_data[0] = (message_length >> 24) & 0xFF;
             tx_data[1] = (message_length >> 16) & 0xFF;
             tx_data[2] = (message_length >> 8) & 0xFF;
