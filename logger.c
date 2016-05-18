@@ -17,11 +17,11 @@
 /******************************************************
  *                      Macros
  ******************************************************/
-#define SAMPLE_RATE_HZ                      (50)
-#define SIZE_PER_SAMPLE                     (35)
+#define SAMPLE_RATE_HZ                      (1)
+#define SIZE_PER_SAMPLE                     (50)
 #define SENT_SAMPLES_PER_SECOND             (10)
-#define NUM_SAMPLES_PER_PACKET              (SAMPLE_RATE_HZ/SENT_SAMPLES_PER_SECOND)
-#define TCP_PACKET_MAX_DATA_LENGTH          (60)
+
+#define TCP_PACKET_MAX_DATA_LENGTH          (100)
 #define TCP_SERVER_LISTEN_PORT              (5000)
 #define TCP_SERVER_THREAD_PRIORITY          (WICED_DEFAULT_LIBRARY_PRIORITY)
 /* Stack size should cater for printf calls */
@@ -43,6 +43,8 @@
 /******************************************************
  *                    Constants
  ******************************************************/
+static int MS_PER_SAMPLE = (1000/SAMPLE_RATE_HZ);
+static int NUM_SAMPLES_PER_PACKET = (SAMPLE_RATE_HZ/SENT_SAMPLES_PER_SECOND);
 
 static int POLL_DELAY = 1000;
 /******************************************************
@@ -117,7 +119,7 @@ void TIM2_irq()
                 // led2_on = !led2_on;
             // }
         }
-        sample++;
+        sample += MS_PER_SAMPLE;
         TIM_ClearITPendingBit(TIM2, TIM_IT_Update);
     }
 }
@@ -127,9 +129,9 @@ void InitializeTimer()
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
 
     TIM_TimeBaseInitTypeDef timerInitStructure;
-    timerInitStructure.TIM_Prescaler = 120000-1;
+    timerInitStructure.TIM_Prescaler = 40000-1;
     timerInitStructure.TIM_CounterMode = TIM_CounterMode_Up;
-    timerInitStructure.TIM_Period = (1000/SAMPLE_RATE_HZ)-1;
+    timerInitStructure.TIM_Period = (MS_PER_SAMPLE)-1;
     timerInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;
     timerInitStructure.TIM_RepetitionCounter = 0;
     TIM_TimeBaseInit(TIM2, &timerInitStructure);
